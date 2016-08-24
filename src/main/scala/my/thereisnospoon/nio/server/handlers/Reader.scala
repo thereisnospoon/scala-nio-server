@@ -2,18 +2,25 @@ package my.thereisnospoon.nio.server.handlers
 
 import java.nio.ByteBuffer
 import java.nio.channels.{Selector, SelectionKey, SocketChannel}
+import java.nio.charset.StandardCharsets
+import java.util.regex.Pattern
 
 import scala.collection.mutable.ListBuffer
 
 class Reader(private val key: SelectionKey) extends Runnable {
+
+  val buffer = ByteBuffer.allocate(1024)
 
   @volatile
   var messageData: List[Byte] = Nil
 
   private def doRun(): Unit = {
 
-    val buffer = ByteBuffer.allocate(1024)
     buffer.clear()
+
+    if (!key.isValid || !key.isReadable) {
+      return
+    }
 
     val bytesRead = key.channel().asInstanceOf[SocketChannel].read(buffer)
 
@@ -21,10 +28,9 @@ class Reader(private val key: SelectionKey) extends Runnable {
       return
     }
 
-    val appendedData = appendMessageData(buffer)
+    appendMessageData(buffer)
 
-    if (isEndOfMessageReached(appendedData)) {
-      println(s"Received ${messageData.mkString(", ")}")
+    if (isEndOfMessageReached) {
       attachWriterToChannel()
     }
   }
@@ -46,7 +52,13 @@ class Reader(private val key: SelectionKey) extends Runnable {
     appendedData
   }
 
-  private def isEndOfMessageReached(readData: List[Byte]): Boolean = readData.toSet(Constants.End_of_message)
+  private def isEndOfMessageReached: Boolean = {
+
+    messageData.reverse.take(4) match {
+      case '\n' :: '\r' :: '\n' :: '\r' :: Nil => true
+      case _ => false
+    }
+  }
 
   private def attachWriterToChannel() = {
 
