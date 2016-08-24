@@ -1,37 +1,56 @@
 package my.thereisnospoon.nio.server.handlers
 
 import java.nio.ByteBuffer
-import java.nio.channels.{SelectionKey, SocketChannel}
+import java.nio.channels.{Selector, SelectionKey, SocketChannel}
 
 import scala.collection.mutable.ListBuffer
 
-class Reader(private val selectionKey: SelectionKey) extends Handler {
+class Reader(private val key: SelectionKey) extends Runnable {
 
-  private val messageData = new ListBuffer[Byte]
-  private val buffer = ByteBuffer.allocate(1024)
+  @volatile
+  var messageData: List[Byte] = Nil
 
-  override def run(): Unit = {
+  private def doRun(): Unit = {
 
-    val channel = selectionKey.channel().asInstanceOf[SocketChannel]
-    val bytesRead = channel.read(buffer)
-    if (bytesRead <= 0) {
-      selectionKey.interestOps(SelectionKey.OP_WRITE)
-      selectionKey.attach(new Writer(selectionKey, messageData))
-      selectionKey.selector().wakeup()
+    val buffer = ByteBuffer.allocate(1024)
+    buffer.clear()
 
-    } else {
-      appendMessageData()
+    val bytesRead = key.channel().asInstanceOf[SocketChannel].read(buffer)
+
+    if (bytesRead == 0) {
+      return
+    }
+
+    val appendedData = appendMessageData(buffer)
+
+    if (isEndOfMessageReached(appendedData)) {
+      println(s"Received ${messageData.mkString(", ")}")
+      attachWriterToChannel()
     }
   }
 
-  private def appendMessageData(): Unit = {
+  override def run() = {
+
+    synchronized {
+      doRun()
+    }
+  }
+
+  private def appendMessageData(buffer: ByteBuffer): List[Byte] = {
 
     buffer.flip()
     val array = new Array[Byte](buffer.limit())
     buffer.get(array)
-    messageData ++= array
+    val appendedData = array.toList
+    messageData = messageData ::: appendedData
+    appendedData
+  }
 
+  private def isEndOfMessageReached(readData: List[Byte]): Boolean = readData.toSet(Constants.End_of_message)
 
-    println(s"Message: ${messageData.mkString(", ")}")
+  private def attachWriterToChannel() = {
+
+    key.attach(new Writer(key, messageData))
+    key.interestOps(SelectionKey.OP_WRITE)
   }
 }

@@ -1,23 +1,33 @@
 package my.thereisnospoon.nio.server.handlers
 
 import java.nio.ByteBuffer
-import java.nio.channels.{SocketChannel, SelectionKey}
+import java.nio.channels.{Selector, SocketChannel, SelectionKey}
 
 import scala.collection.mutable
 
-class Writer(private val selectionKey: SelectionKey, private val data: mutable.Buffer[Byte]) extends Handler {
+class Writer(private val key: SelectionKey, private val data: List[Byte]) extends Runnable {
 
-  private val responseData: Seq[Byte] = "Hello ".getBytes.toBuffer ++= data
-  private val buffer = ByteBuffer.wrap(responseData.toArray)
-  buffer.flip()
+  @volatile
+  private var responseData: List[Byte] = "Hello ".getBytes.toList ::: data
 
-  override def run(): Unit = {
+  private def doWrite(): Unit = {
 
-    val channel = selectionKey.channel().asInstanceOf[SocketChannel]
+    val channel = key.channel().asInstanceOf[SocketChannel]
+
+    if (responseData.isEmpty) {
+      key.attach(null)
+      return
+    }
+
+    val buffer = ByteBuffer.wrap(responseData.toArray)
     val bytesWritten = channel.write(buffer)
 
-    if (bytesWritten < 0) {
-      channel.close()
+    responseData = responseData.drop(bytesWritten)
+  }
+
+  override def run() = {
+    synchronized {
+      doWrite()
     }
   }
 }

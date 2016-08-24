@@ -1,9 +1,9 @@
 package my.thereisnospoon.nio.server
 
-import java.nio.channels.{SelectionKey, Selector}
+import java.nio.channels.{SocketChannel, SelectionKey, Selector}
 import java.util.concurrent.Executors
 
-import my.thereisnospoon.nio.server.handlers.Handler
+import my.thereisnospoon.nio.server.handlers.{Writer, Reader}
 
 import scala.concurrent.ExecutionContext
 
@@ -11,7 +11,7 @@ class Reactor(private val port: Int) extends Runnable {
 
   private val selector = Selector.open()
   private val acceptor: Acceptor = new Acceptor(port, selector)
-  private val handlersExecutionContext = ExecutionContext.fromExecutorService(Executors.newFixedThreadPool(2))
+  private val executionContext = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(2))
 
   override def run() = {
 
@@ -23,13 +23,25 @@ class Reactor(private val port: Int) extends Runnable {
       while (iterator.hasNext) {
 
         val selectionKey = iterator.next()
-        if (selectionKey.isAcceptable) {
-          acceptor.acceptConnection()
-        } else {
-          handlersExecutionContext.execute(selectionKey.attachment().asInstanceOf[Handler])
+        if (selectionKey.isValid) {
+          processKeyEvent(selectionKey)
         }
 
         iterator.remove()
+      }
+    }
+  }
+
+  private def processKeyEvent(selectionKey: SelectionKey) = {
+
+    if (selectionKey.isAcceptable) {
+      acceptor.acceptConnection()
+    } else {
+      val handler = selectionKey.attachment()
+      if (handler == null) {
+        selectionKey.channel().close()
+      } else {
+        executionContext.execute(handler.asInstanceOf[Runnable])
       }
     }
   }
